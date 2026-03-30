@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Search, Box, BookOpen, Compass, ArrowRight } from "lucide-react";
 import { prisma } from "@/lib/db/prisma";
+import { StatusBadge } from "@/components/ui/status-badge";
 
 export const dynamic = "force-dynamic";
 
@@ -103,7 +104,7 @@ export default async function HomePage() {
                   <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors">
                     {product.name}
                   </h3>
-                  <StatusBadge status={product.status} />
+                  <StatusBadge status={product.status} short />
                 </div>
                 <p className="mt-2 text-sm leading-relaxed text-muted line-clamp-2">
                   {product.description}
@@ -196,30 +197,6 @@ function PillarCard({
         <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
       </span>
     </Link>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    GA: "bg-[var(--color-success-light)] text-[var(--color-success)]",
-    BETA: "bg-[var(--color-warning-light)] text-[var(--color-warning)]",
-    COMING_SOON: "bg-surface text-muted",
-    DEPRECATED: "bg-[var(--color-danger-light)] text-[var(--color-danger)]",
-  };
-
-  const labels: Record<string, string> = {
-    GA: "GA",
-    BETA: "Beta",
-    COMING_SOON: "Coming Soon",
-    DEPRECATED: "Deprecated",
-  };
-
-  return (
-    <span
-      className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium ${styles[status] ?? "bg-surface text-muted"}`}
-    >
-      {labels[status] ?? status}
-    </span>
   );
 }
 
