@@ -159,3 +159,20 @@ export async function getAllGuides(): Promise<GuideMeta[]> {
 
   return guides.sort((a, b) => a.frontmatter.order - b.frontmatter.order);
 }
+
+/**
+ * Returns slugs of all products that have at least one MDX doc file.
+ */
+export function getProductSlugsWithDocs(): string[] {
+  const docsDir = path.join(CONTENT_DIR, "docs");
+  if (!fs.existsSync(docsDir)) return [];
+
+  return fs
+    .readdirSync(docsDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name)
+    .filter((name) => {
+      const files = fs.readdirSync(path.join(docsDir, name));
+      return files.some((f) => f.endsWith(".mdx"));
+    });
+}
