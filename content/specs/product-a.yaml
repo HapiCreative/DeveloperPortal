@@ -1,0 +1,631 @@
+openapi: "3.0.3"
+info:
+  title: Payment Processing API
+  version: "2.1.0"
+  description: |
+    The Payment Processing API enables you to accept payments, manage transactions,
+    and handle refunds programmatically. Build custom checkout flows, recurring billing,
+    and real-time transaction monitoring into your application.
+
+    ## Authentication
+    All API requests require a Bearer token in the `Authorization` header.
+    Obtain your API key from the [Developer Dashboard](/dashboard).
+
+    ## Rate Limits
+    - **Test environment:** 100 requests/minute
+    - **Production environment:** 1,000 requests/minute
+
+    Rate limit headers are included in every response:
+    - `X-RateLimit-Limit` — Maximum requests per window
+    - `X-RateLimit-Remaining` — Requests remaining in current window
+    - `X-RateLimit-Reset` — Unix timestamp when the window resets
+  contact:
+    name: API Support
+    email: api-support@example.com
+    url: https://developer.example.com/support
+
+servers:
+  - url: https://api.example.com/v2
+    description: Production
+  - url: https://sandbox.api.example.com/v2
+    description: Sandbox / Testing
+
+tags:
+  - name: Users
+    description: Manage user accounts and profiles
+  - name: Transactions
+    description: Create, retrieve, and manage payment transactions
+
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Use a valid API key as the Bearer token.
+        Example: `Authorization: Bearer sk_test_abc123`
+
+  schemas:
+    User:
+      type: object
+      required:
+        - id
+        - email
+        - name
+        - status
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "usr_8a3b1c2d-4e5f-6789-abcd-ef0123456789"
+          description: Unique user identifier
+        email:
+          type: string
+          format: email
+          example: "jane.doe@example.com"
+          description: User's email address (unique)
+        name:
+          type: string
+          example: "Jane Doe"
+          description: Full name of the user
+        phone:
+          type: string
+          example: "+1-555-123-4567"
+          description: Phone number in E.164 format
+        status:
+          type: string
+          enum: [active, suspended, closed]
+          example: "active"
+          description: Current account status
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Arbitrary key-value pairs attached to the user
+          example:
+            tier: "premium"
+            referralCode: "REF-9876"
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-01-15T09:30:00Z"
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2026-03-20T14:22:00Z"
+
+    CreateUserRequest:
+      type: object
+      required:
+        - email
+        - name
+      properties:
+        email:
+          type: string
+          format: email
+          example: "jane.doe@example.com"
+        name:
+          type: string
+          example: "Jane Doe"
+        phone:
+          type: string
+          example: "+1-555-123-4567"
+        metadata:
+          type: object
+          additionalProperties: true
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "Jane Smith"
+        phone:
+          type: string
+          example: "+1-555-987-6543"
+        metadata:
+          type: object
+          additionalProperties: true
+
+    Transaction:
+      type: object
+      required:
+        - id
+        - userId
+        - amount
+        - currency
+        - status
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "txn_f1e2d3c4-b5a6-7890-cdef-123456789abc"
+          description: Unique transaction identifier
+        userId:
+          type: string
+          format: uuid
+          example: "usr_8a3b1c2d-4e5f-6789-abcd-ef0123456789"
+          description: The user who initiated the transaction
+        amount:
+          type: integer
+          description: Amount in the smallest currency unit (e.g., cents)
+          example: 4999
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          example: "USD"
+          description: ISO 4217 currency code
+        status:
+          type: string
+          enum: [pending, completed, failed, refunded]
+          example: "completed"
+          description: Current transaction status
+        description:
+          type: string
+          example: "Monthly subscription — Pro plan"
+        paymentMethod:
+          type: string
+          enum: [card, bank_transfer, wallet]
+          example: "card"
+        refundedAmount:
+          type: integer
+          description: Total amount refunded (smallest currency unit)
+          example: 0
+        metadata:
+          type: object
+          additionalProperties: true
+          example:
+            orderId: "ORD-20260315-001"
+            invoiceRef: "INV-2026-0042"
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-03-15T11:45:00Z"
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2026-03-15T11:45:02Z"
+
+    CreateTransactionRequest:
+      type: object
+      required:
+        - userId
+        - amount
+        - currency
+      properties:
+        userId:
+          type: string
+          format: uuid
+          example: "usr_8a3b1c2d-4e5f-6789-abcd-ef0123456789"
+        amount:
+          type: integer
+          minimum: 1
+          example: 4999
+          description: Amount in the smallest currency unit
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          example: "USD"
+        description:
+          type: string
+          example: "Monthly subscription — Pro plan"
+        paymentMethod:
+          type: string
+          enum: [card, bank_transfer, wallet]
+          example: "card"
+        metadata:
+          type: object
+          additionalProperties: true
+
+    PaginatedUsers:
+      type: object
+      required:
+        - data
+        - total
+        - limit
+        - offset
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        total:
+          type: integer
+          example: 142
+          description: Total number of records matching the query
+        limit:
+          type: integer
+          example: 20
+        offset:
+          type: integer
+          example: 0
+
+    PaginatedTransactions:
+      type: object
+      required:
+        - data
+        - total
+        - limit
+        - offset
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Transaction"
+        total:
+          type: integer
+          example: 1024
+        limit:
+          type: integer
+          example: 20
+        offset:
+          type: integer
+          example: 0
+
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code
+          example: "validation_error"
+        message:
+          type: string
+          description: Human-readable error description
+          example: "The 'email' field is required."
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+                example: "email"
+              issue:
+                type: string
+                example: "must be a valid email address"
+
+  responses:
+    BadRequest:
+      description: Bad Request — validation failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: "validation_error"
+            message: "Request validation failed."
+            details:
+              - field: "email"
+                issue: "must be a valid email address"
+
+    Unauthorized:
+      description: Unauthorized — missing or invalid Bearer token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: "unauthorized"
+            message: "Invalid or expired authentication token."
+
+    Forbidden:
+      description: Forbidden — insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: "forbidden"
+            message: "You do not have permission to perform this action."
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: "not_found"
+            message: "The requested resource was not found."
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: "internal_error"
+            message: "An unexpected error occurred. Please try again later."
+
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      description: Maximum number of records to return (1–100)
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    Offset:
+      name: offset
+      in: query
+      description: Number of records to skip for pagination
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+
+paths:
+  /users:
+    get:
+      tags: [Users]
+      summary: List users
+      description: Retrieve a paginated list of users. Supports filtering by status and searching by name or email.
+      operationId: listUsers
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - name: status
+          in: query
+          description: Filter by account status
+          required: false
+          schema:
+            type: string
+            enum: [active, suspended, closed]
+        - name: search
+          in: query
+          description: Search users by name or email (case-insensitive partial match)
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated list of users
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedUsers"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    post:
+      tags: [Users]
+      summary: Create a user
+      description: Create a new user account. The email address must be unique across all users.
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /users/{userId}:
+    get:
+      tags: [Users]
+      summary: Get a user
+      description: Retrieve a single user by their unique identifier.
+      operationId: getUser
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: Unique user identifier
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: User details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    put:
+      tags: [Users]
+      summary: Update a user
+      description: Update an existing user's profile. Only provided fields will be changed.
+      operationId: updateUser
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: Unique user identifier
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRequest"
+      responses:
+        "200":
+          description: User updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /transactions:
+    get:
+      tags: [Transactions]
+      summary: List transactions
+      description: Retrieve a paginated list of transactions. Supports filtering by status and user.
+      operationId: listTransactions
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - name: status
+          in: query
+          description: Filter by transaction status
+          required: false
+          schema:
+            type: string
+            enum: [pending, completed, failed, refunded]
+        - name: userId
+          in: query
+          description: Filter transactions by user ID
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Paginated list of transactions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedTransactions"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    post:
+      tags: [Transactions]
+      summary: Create a transaction
+      description: |
+        Initiate a new payment transaction. The transaction will be created with a `pending` status
+        and processed asynchronously. Subscribe to the `transaction.completed` webhook event to be
+        notified when processing finishes.
+      operationId: createTransaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTransactionRequest"
+      responses:
+        "201":
+          description: Transaction created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transaction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /transactions/{transactionId}:
+    get:
+      tags: [Transactions]
+      summary: Get a transaction
+      description: Retrieve full details of a single transaction by its identifier.
+      operationId: getTransaction
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          description: Unique transaction identifier
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Transaction details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transaction"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      tags: [Transactions]
+      summary: Refund a transaction
+      description: |
+        Issue a full refund for a completed transaction. The transaction status will change to `refunded`.
+        Only transactions with status `completed` can be refunded.
+      operationId: refundTransaction
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          description: Unique transaction identifier
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Transaction refunded successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transaction"
+              example:
+                id: "txn_f1e2d3c4-b5a6-7890-cdef-123456789abc"
+                userId: "usr_8a3b1c2d-4e5f-6789-abcd-ef0123456789"
+                amount: 4999
+                currency: "USD"
+                status: "refunded"
+                description: "Monthly subscription — Pro plan"
+                paymentMethod: "card"
+                refundedAmount: 4999
+                createdAt: "2026-03-15T11:45:00Z"
+                updatedAt: "2026-03-15T12:30:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
