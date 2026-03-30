@@ -1,0 +1,125 @@
+---
+title: "Quickstart"
+description: "Go from zero to your first API call in under 5 minutes."
+product: "product-a"
+section: "quickstart"
+order: 1
+updatedAt: "2026-03-25"
+---
+
+# Getting Started with Product A
+
+Welcome to Product A! This quickstart guide will walk you through making your first API call in under 5 minutes.
+
+## Prerequisites
+
+Before you begin, make sure you have:
+
+- A Developer Portal account with an API key
+- Node.js 18+ or Python 3.9+ installed
+- A terminal or command-line interface
+
+<Callout type="tip">
+  Don't have an API key yet? Head to the [Dashboard](/dashboard/api-keys) to create one.
+</Callout>
+
+## Installation
+
+Install the Product A SDK using your preferred package manager:
+
+<CodeGroup>
+```bash data-label="npm"
+npm install @product-a/sdk
+```
+
+```bash data-label="yarn"
+yarn add @product-a/sdk
+```
+
+```bash data-label="pip"
+pip install product-a
+```
+</CodeGroup>
+
+## Make Your First API Call
+
+<Steps>
+<div>
+### Initialize the Client
+
+Create a new file and initialize the SDK with your API key:
+
+```typescript
+import { ProductA } from "@product-a/sdk";
+
+const client = new ProductA({
+  apiKey: process.env.PRODUCT_A_API_KEY,
+});
+```
+</div>
+
+<div>
+### Fetch Resources
+
+Use the client to list your resources:
+
+```typescript
+const resources = await client.resources.list({
+  limit: 10,
+  status: "active",
+});
+
+console.log(resources.data);
+```
+</div>
+
+<div>
+### Create a Resource
+
+Create your first resource with the API:
+
+```typescript
+const newResource = await client.resources.create({
+  name: "My First Resource",
+  type: "standard",
+  metadata: {
+    environment: "development",
+  },
+});
+
+console.log(`Created: ${newResource.id}`);
+```
+</div>
+</Steps>
+
+<Callout type="warning">
+  Never hard-code your API key in source code. Always use environment variables.
+</Callout>
+
+## Verify It Works
+
+Run your script and you should see output similar to:
+
+```json
+{
+  "id": "res_abc123",
+  "name": "My First Resource",
+  "type": "standard",
+  "status": "active",
+  "createdAt": "2026-03-25T10:30:00Z"
+}
+```
+
+## Next Steps
+
+Now that you've made your first API call, explore these resources:
+
+| Resource | Description |
+|----------|-------------|
+| [SDK Reference](/docs/product-a/sdk-reference) | Full SDK method documentation |
+| [Webhooks](/docs/product-a/webhooks) | Set up real-time event notifications |
+| [API Reference](/products/product-a/api-reference) | Interactive API explorer |
+
+<Callout type="info">
+  Product A supports both REST and GraphQL APIs. This quickstart uses the REST API via the SDK. See the [API Reference](/products/product-a/api-reference) for GraphQL examples.
+</Callout>
