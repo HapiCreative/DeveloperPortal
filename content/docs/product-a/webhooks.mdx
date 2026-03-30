@@ -1,0 +1,214 @@
+---
+title: "Webhooks"
+description: "Set up real-time event notifications with Product A webhooks."
+product: "product-a"
+section: "webhooks"
+order: 3
+updatedAt: "2026-03-18"
+---
+
+# Webhooks
+
+Webhooks allow you to receive real-time HTTP notifications when events occur in your Product A account. Instead of polling the API, your server is notified immediately when resources are created, updated, or deleted.
+
+## How Webhooks Work
+
+1. You register a webhook endpoint URL in your [Dashboard](/dashboard)
+2. When an event occurs, Product A sends an HTTP POST request to your URL
+3. Your server processes the event and responds with a `200` status code
+4. If delivery fails, Product A retries with exponential backoff
+
+## Event Types
+
+| Event | Description | Payload |
+|-------|-------------|---------|
+| `resource.created` | A new resource was created | Full resource object |
+| `resource.updated` | A resource was modified | Updated resource + changed fields |
+| `resource.deleted` | A resource was deleted | Resource ID and deletion timestamp |
+| `resource.status_changed` | Resource status changed | Resource ID, old status, new status |
+| `key.rotated` | An API key was rotated | Key ID (not the key itself) |
+
+## Setting Up Webhooks
+
+<Steps>
+<div>
+### Create an Endpoint
+
+Register your webhook URL via the API or dashboard:
+
+<ApiEndpoint method="POST" path="/v1/webhooks" />
+
+```typescript
+const webhook = await client.webhooks.create({
+  url: "https://your-app.com/api/webhooks/product-a",
+  events: ["resource.created", "resource.updated"],
+  secret: "whsec_your_signing_secret",
+});
+```
+</div>
+
+<div>
+### Handle Incoming Events
+
+Create an HTTP endpoint that receives POST requests:
+
+```typescript
+import { ProductA } from "@product-a/sdk";
+import express from "express";
+
+const app = express();
+
+app.post(
+  "/api/webhooks/product-a",
+  express.raw({ type: "application/json" }),
+  (req, res) => {
+    const signature = req.headers["x-producta-signature"] as string;
+    const timestamp = req.headers["x-producta-timestamp"] as string;
+
+    // Verify the webhook signature
+    const isValid = ProductA.webhooks.verify({
+      payload: req.body,
+      signature,
+      timestamp,
+      secret: process.env.WEBHOOK_SECRET!,
+    });
+
+    if (!isValid) {
+      return res.status(401).send("Invalid signature");
+    }
+
+    const event = JSON.parse(req.body.toString());
+
+    switch (event.type) {
+      case "resource.created":
+        console.log("New resource:", event.data.id);
+        break;
+      case "resource.updated":
+        console.log("Updated resource:", event.data.id);
+        break;
+    }
+
+    res.status(200).json({ received: true });
+  }
+);
+```
+</div>
+
+<div>
+### Test Your Webhook
+
+Send a test event from the dashboard or API:
+
+```bash
+curl -X POST https://api.producta.dev/v1/webhooks/whk_abc123/test \
+  -H "Authorization: Bearer $PRODUCT_A_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"event": "resource.created"}'
+```
+</div>
+</Steps>
+
+## Signature Verification
+
+<Callout type="danger">
+  Always verify webhook signatures before processing events. Without verification, an attacker could send fake events to your endpoint.
+</Callout>
+
+Product A signs every webhook payload using HMAC-SHA256. The signature is included in the `x-producta-signature` header.
+
+### Verification Algorithm
+
+```typescript
+import crypto from "crypto";
+
+function verifyWebhookSignature(
+  payload: string,
+  signature: string,
+  timestamp: string,
+  secret: string
+): boolean {
+  // Reject events older than 5 minutes to prevent replay attacks
+  const age = Date.now() - parseInt(timestamp) * 1000;
+  if (age > 300_000) return false;
+
+  const signedPayload = `${timestamp}.${payload}`;
+  const expected = crypto
+    .createHmac("sha256", secret)
+    .update(signedPayload)
+    .digest("hex");
+
+  return crypto.timingSafeEqual(
+    Buffer.from(signature),
+    Buffer.from(expected)
+  );
+}
+```
+
+## Retry Behavior
+
+If your endpoint returns a non-2xx status code or times out, Product A retries the delivery:
+
+| Attempt | Delay |
+|---------|-------|
+| 1st retry | 1 minute |
+| 2nd retry | 5 minutes |
+| 3rd retry | 30 minutes |
+| 4th retry | 2 hours |
+| 5th retry | 24 hours |
+
+After 5 failed attempts, the webhook is marked as `failed` and you'll receive an email notification.
+
+<Callout type="warning">
+  Your endpoint must respond within **30 seconds**. For long-running processing, acknowledge the webhook immediately and handle the event asynchronously using a queue.
+</Callout>
+
+## Webhook Payload Format
+
+Every webhook POST body follows this structure:
+
+```json
+{
+  "id": "evt_abc123",
+  "type": "resource.created",
+  "apiVersion": "2026-03-01",
+  "createdAt": "2026-03-25T10:30:00Z",
+  "data": {
+    "id": "res_def456",
+    "name": "My Resource",
+    "type": "standard",
+    "status": "active"
+  }
+}
+```
+
+## Managing Webhooks
+
+### List Webhooks
+
+<ApiEndpoint method="GET" path="/v1/webhooks" />
+
+### Update Events
+
+<ApiEndpoint method="PATCH" path="/v1/webhooks/:id" />
+
+```typescript
+await client.webhooks.update("whk_abc123", {
+  events: [
+    "resource.created",
+    "resource.updated",
+    "resource.deleted",
+  ],
+});
+```
+
+### Delete a Webhook
+
+<ApiEndpoint method="DELETE" path="/v1/webhooks/:id" />
+
+```typescript
+await client.webhooks.delete("whk_abc123");
+```
+
+<Callout type="info">
+  You can register up to 10 webhook endpoints per account. If you need more, contact support.
+</Callout>

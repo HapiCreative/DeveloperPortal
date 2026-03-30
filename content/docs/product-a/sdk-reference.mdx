@@ -1,0 +1,209 @@
+---
+title: "SDK Reference"
+description: "Installation, configuration, and usage reference for the Product A SDK."
+product: "product-a"
+section: "sdk-reference"
+order: 2
+updatedAt: "2026-03-20"
+---
+
+# SDK Reference
+
+The Product A SDK provides type-safe, idiomatic access to the Product A API in multiple languages.
+
+## Supported Languages
+
+| Language | Package | Min Version |
+|----------|---------|-------------|
+| Node.js / TypeScript | `@product-a/sdk` | Node 18+ |
+| Python | `product-a` | Python 3.9+ |
+| Go | `github.com/product-a/go-sdk` | Go 1.21+ |
+| Java | `com.producta:sdk` | Java 17+ |
+
+## Installation
+
+<CodeGroup>
+```bash data-label="Node.js"
+npm install @product-a/sdk
+```
+
+```bash data-label="Python"
+pip install product-a
+```
+
+```bash data-label="Go"
+go get github.com/product-a/go-sdk
+```
+
+```bash data-label="Java"
+<!-- Maven -->
+<dependency>
+  <groupId>com.producta</groupId>
+  <artifactId>sdk</artifactId>
+  <version>2.4.0</version>
+</dependency>
+```
+</CodeGroup>
+
+## Configuration
+
+### Initialize the Client
+
+<CodeGroup>
+```typescript data-label="Node.js"
+import { ProductA } from "@product-a/sdk";
+
+const client = new ProductA({
+  apiKey: process.env.PRODUCT_A_API_KEY,
+  // Optional configuration
+  baseUrl: "https://api.producta.dev/v1",
+  timeout: 30_000,
+  retries: 3,
+});
+```
+
+```python data-label="Python"
+from product_a import ProductA
+
+client = ProductA(
+    api_key=os.environ["PRODUCT_A_API_KEY"],
+    # Optional configuration
+    base_url="https://api.producta.dev/v1",
+    timeout=30.0,
+    max_retries=3,
+)
+```
+
+```go data-label="Go"
+import producta "github.com/product-a/go-sdk"
+
+client := producta.NewClient(
+    producta.WithAPIKey(os.Getenv("PRODUCT_A_API_KEY")),
+    // Optional configuration
+    producta.WithBaseURL("https://api.producta.dev/v1"),
+    producta.WithTimeout(30 * time.Second),
+    producta.WithRetries(3),
+)
+```
+</CodeGroup>
+
+### Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `apiKey` | `string` | — | Your API key (required) |
+| `baseUrl` | `string` | `https://api.producta.dev/v1` | API base URL |
+| `timeout` | `number` | `30000` | Request timeout in ms |
+| `retries` | `number` | `2` | Max automatic retries on failure |
+
+## Resources API
+
+### List Resources
+
+<ApiEndpoint method="GET" path="/v1/resources" />
+
+```typescript
+const resources = await client.resources.list({
+  limit: 20,
+  offset: 0,
+  status: "active",
+  sort: "createdAt:desc",
+});
+
+// resources.data — array of Resource objects
+// resources.pagination — { total, limit, offset, hasMore }
+```
+
+### Get a Resource
+
+<ApiEndpoint method="GET" path="/v1/resources/:id" />
+
+```typescript
+const resource = await client.resources.get("res_abc123");
+```
+
+### Create a Resource
+
+<ApiEndpoint method="POST" path="/v1/resources" />
+
+```typescript
+const resource = await client.resources.create({
+  name: "Production Resource",
+  type: "standard",
+  config: {
+    region: "us-east-1",
+    tier: "premium",
+  },
+});
+```
+
+### Update a Resource
+
+<ApiEndpoint method="PATCH" path="/v1/resources/:id" />
+
+```typescript
+const updated = await client.resources.update("res_abc123", {
+  name: "Updated Name",
+  config: {
+    tier: "enterprise",
+  },
+});
+```
+
+### Delete a Resource
+
+<ApiEndpoint method="DELETE" path="/v1/resources/:id" />
+
+```typescript
+await client.resources.delete("res_abc123");
+```
+
+<Callout type="danger">
+  Deleting a resource is permanent and cannot be undone. All associated data will be removed.
+</Callout>
+
+## Error Handling
+
+The SDK throws typed errors that you can catch and handle:
+
+```typescript
+import { ProductA, ApiError, RateLimitError } from "@product-a/sdk";
+
+try {
+  const resource = await client.resources.get("res_invalid");
+} catch (error) {
+  if (error instanceof RateLimitError) {
+    console.log(`Rate limited. Retry after ${error.retryAfter}s`);
+  } else if (error instanceof ApiError) {
+    console.log(`API error ${error.status}: ${error.message}`);
+  }
+}
+```
+
+## Pagination
+
+All list methods support cursor-based pagination:
+
+```typescript
+let hasMore = true;
+let cursor: string | undefined;
+
+while (hasMore) {
+  const page = await client.resources.list({
+    limit: 100,
+    cursor,
+  });
+
+  for (const resource of page.data) {
+    process.stdout.write(`Processing ${resource.id}\n`);
+  }
+
+  cursor = page.pagination.nextCursor;
+  hasMore = page.pagination.hasMore;
+}
+```
+
+<Callout type="tip">
+  For large datasets, use the built-in auto-pagination helper:
+  `for await (const resource of client.resources.listAutoPaginating())`.
+</Callout>
