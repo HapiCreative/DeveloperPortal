@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { ThemeProvider } from "next-themes";
+import { Navbar } from "@/components/ui/navbar";
+import { Footer } from "@/components/ui/footer";
 import "./globals.css";
 
 const inter = Inter({
@@ -14,8 +16,12 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Developer Portal",
-  description: "Discover products, read documentation, follow guides, and manage your API integrations.",
+  title: {
+    template: "%s | Developer Portal",
+    default: "Developer Portal",
+  },
+  description:
+    "Discover products, read documentation, follow guides, and manage your API integrations.",
 };
 
 export default function RootLayout({
@@ -31,7 +37,9 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col antialiased">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          {children}
+          <Navbar />
+          <main className="flex-1">{children}</main>
+          <Footer />
         </ThemeProvider>
       </body>
     </html>
