@@ -50,3 +50,10 @@ export async function getProductCount() {
     where: { visibility: "PUBLIC" },
   });
 }
+
+export async function getProductBySlug(slug: string) {
+  return prisma.product.findUnique({
+    where: { slug, visibility: "PUBLIC" },
+    include: { category: true },
+  });
+}
