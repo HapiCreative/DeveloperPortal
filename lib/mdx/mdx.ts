@@ -25,6 +25,7 @@ export interface GuideFrontmatter {
     | "common-use-cases"
     | "advanced-patterns";
   order: number;
+  updatedAt: string;
 }
 
 export interface HeadingNode {
@@ -135,6 +136,27 @@ export interface GuideMeta {
   frontmatter: GuideFrontmatter;
 }
 
+/**
+ * Recursively collects all .mdx files under a directory,
+ * returning paths relative to the base directory (without extension).
+ */
+function collectMdxFiles(dir: string, base: string): string[] {
+  if (!fs.existsSync(dir)) return [];
+  const results: string[] = [];
+
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...collectMdxFiles(fullPath, base));
+    } else if (entry.isFile() && entry.name.endsWith(".mdx")) {
+      const relative = path.relative(base, fullPath);
+      results.push(relative.replace(/\.mdx$/, ""));
+    }
+  }
+
+  return results;
+}
+
 export async function getAllGuides(): Promise<GuideMeta[]> {
   const guidesDir = path.join(CONTENT_DIR, "guides");
 
@@ -142,22 +164,50 @@ export async function getAllGuides(): Promise<GuideMeta[]> {
     return [];
   }
 
-  const files = fs
-    .readdirSync(guidesDir)
-    .filter((f) => f.endsWith(".mdx"));
+  const slugs = collectMdxFiles(guidesDir, guidesDir);
 
-  const guides: GuideMeta[] = files.map((file) => {
-    const filePath = path.join(guidesDir, file);
+  const guides: GuideMeta[] = slugs.map((slug) => {
+    const filePath = path.join(guidesDir, `${slug}.mdx`);
     const fileContents = fs.readFileSync(filePath, "utf-8");
     const { data } = matter(fileContents);
 
     return {
-      slug: file.replace(/\.mdx$/, ""),
+      slug,
       frontmatter: data as GuideFrontmatter,
     };
   });
 
   return guides.sort((a, b) => a.frontmatter.order - b.frontmatter.order);
+}
+
+/**
+ * Find up to `limit` related guides based on shared products or category.
+ */
+export async function getRelatedGuides(
+  currentSlug: string,
+  products: string[],
+  category: string,
+  limit = 3
+): Promise<GuideMeta[]> {
+  const allGuides = await getAllGuides();
+
+  const scored = allGuides
+    .filter((g) => g.slug !== currentSlug)
+    .map((g) => {
+      let score = 0;
+      // Shared products
+      const sharedProducts = g.frontmatter.products.filter((p) =>
+        products.includes(p)
+      );
+      score += sharedProducts.length * 2;
+      // Same category
+      if (g.frontmatter.category === category) score += 1;
+      return { guide: g, score };
+    })
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  return scored.slice(0, limit).map((s) => s.guide);
 }
 
 /**

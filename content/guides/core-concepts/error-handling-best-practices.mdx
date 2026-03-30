@@ -1,0 +1,200 @@
+---
+title: "Error Handling Best Practices"
+description: "Build resilient integrations with proper error handling. Learn about error codes, retry strategies, and how to handle common failure scenarios."
+difficulty: "intermediate"
+estimatedMinutes: 12
+products:
+  - product-a
+  - product-b
+category: "core-concepts"
+order: 4
+updatedAt: "2026-03-26"
+---
+
+## Error Response Format
+
+All API errors follow a consistent structure:
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "The 'email' field must be a valid email address",
+    "requestId": "req_abc123xyz",
+    "details": [
+      {
+        "field": "email",
+        "issue": "invalid_format",
+        "expected": "valid email address"
+      }
+    ]
+  }
+}
+```
+
+Every error includes a `requestId` — always log this for debugging and support escalation.
+
+## HTTP Status Codes
+
+| Status | Code | Meaning | Action |
+|--------|------|---------|--------|
+| 400 | `VALIDATION_ERROR` | Invalid request parameters | Fix the request and retry |
+| 401 | `UNAUTHORIZED` | Missing or invalid credentials | Check API key or refresh token |
+| 403 | `FORBIDDEN` | Valid credentials, insufficient permissions | Request additional scopes |
+| 404 | `NOT_FOUND` | Resource doesn't exist | Verify the resource ID |
+| 409 | `CONFLICT` | Resource state conflict | Fetch current state and retry |
+| 429 | `RATE_LIMITED` | Too many requests | Wait and retry with backoff |
+| 500 | `INTERNAL_ERROR` | Server error | Retry with exponential backoff |
+| 503 | `SERVICE_UNAVAILABLE` | Temporary outage | Retry with exponential backoff |
+
+## Implementing Retry Logic
+
+Not all errors should be retried. Here's a strategy:
+
+<Steps>
+<div>
+### Classify the error
+
+<CodeGroup>
+```typescript data-label="node"
+function isRetryable(statusCode: number): boolean {
+  // Retry server errors and rate limits
+  return statusCode === 429 || statusCode >= 500;
+}
+
+function isClientError(statusCode: number): boolean {
+  // Client errors (except 429) should not be retried
+  return statusCode >= 400 && statusCode < 500 && statusCode !== 429;
+}
+```
+
+```python data-label="python"
+def is_retryable(status_code: int) -> bool:
+    """Retry server errors and rate limits."""
+    return status_code == 429 or status_code >= 500
+
+def is_client_error(status_code: int) -> bool:
+    """Client errors (except 429) should not be retried."""
+    return 400 <= status_code < 500 and status_code != 429
+```
+</CodeGroup>
+</div>
+
+<div>
+### Add exponential backoff
+
+<CodeGroup>
+```typescript data-label="node"
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3
+): Promise<T> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      if (attempt === maxRetries || !isRetryable(error.status)) {
+        throw error;
+      }
+
+      const baseDelay = Math.pow(2, attempt) * 1000;
+      const jitter = Math.random() * 1000;
+      await new Promise((r) => setTimeout(r, baseDelay + jitter));
+    }
+  }
+
+  throw new Error("Unreachable");
+}
+```
+
+```python data-label="python"
+import time
+import random
+
+def with_retry(fn, max_retries=3):
+    for attempt in range(max_retries + 1):
+        try:
+            return fn()
+        except ApiError as error:
+            if attempt == max_retries or not is_retryable(error.status):
+                raise
+
+            base_delay = (2 ** attempt)
+            jitter = random.uniform(0, 1)
+            time.sleep(base_delay + jitter)
+```
+</CodeGroup>
+
+<Callout type="tip">
+  Always add jitter to your backoff delay. Without it, multiple clients that fail simultaneously will retry at the same time, causing a "thundering herd" effect.
+</Callout>
+</div>
+
+<div>
+### Handle rate limits specifically
+
+When you receive a `429`, check the `Retry-After` header:
+
+```typescript
+if (error.status === 429) {
+  const retryAfter = parseInt(error.headers["retry-after"] || "5");
+  await new Promise((r) => setTimeout(r, retryAfter * 1000));
+  // Then retry the request
+}
+```
+</div>
+</Steps>
+
+## SDK Built-in Retry
+
+Both official SDKs include automatic retry for transient errors:
+
+<CodeGroup>
+```typescript data-label="node"
+const client = new ProductA({
+  apiKey: process.env.PRODUCT_A_API_KEY,
+  retry: {
+    maxRetries: 3,
+    retryableStatusCodes: [429, 500, 502, 503, 504],
+  },
+});
+```
+
+```python data-label="python"
+client = ProductA(
+    api_key=os.environ["PRODUCT_A_API_KEY"],
+    retry_config={
+        "max_retries": 3,
+        "retryable_status_codes": [429, 500, 502, 503, 504],
+    },
+)
+```
+</CodeGroup>
+
+<Callout type="info">
+  SDK retry is enabled by default with sensible defaults (3 retries, exponential backoff). Override only if you have specific requirements.
+</Callout>
+
+## Logging and Monitoring
+
+Always log the following from error responses:
+
+- `requestId` — for support escalation
+- `error.code` — for categorizing failures
+- HTTP status — for monitoring dashboards
+- Timestamp — for correlation with server-side logs
+
+```typescript
+logger.error("API request failed", {
+  requestId: error.requestId,
+  code: error.code,
+  status: error.status,
+  message: error.message,
+  endpoint: `${method} ${path}`,
+});
+```
+
+## Next Steps
+
+- [Handle Pagination](/guides/core-concepts/handle-pagination) — combine error handling with pagination
+- [Set Up Webhooks](/guides/common-use-cases/set-up-webhooks) — reduce polling and error surface area

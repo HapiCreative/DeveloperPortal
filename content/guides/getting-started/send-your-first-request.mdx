@@ -1,0 +1,153 @@
+---
+title: "Send Your First API Request"
+description: "Go from zero to a working API call in under 10 minutes. This guide walks you through authentication, making a request, and interpreting the response."
+difficulty: "beginner"
+estimatedMinutes: 10
+products:
+  - product-a
+category: "getting-started"
+order: 1
+updatedAt: "2026-03-28"
+---
+
+## Prerequisites
+
+Before you begin, make sure you have:
+
+- A Developer Portal account
+- An API key ([create one here](/dashboard/api-keys))
+- Node.js 18+ or Python 3.9+
+
+<Callout type="tip">
+  If you don't have an account yet, [sign up for free](/signup) — no credit card required.
+</Callout>
+
+## Install the SDK
+
+Choose your preferred language and install the SDK:
+
+<CodeGroup>
+```bash data-label="node"
+npm install @product-a/sdk
+```
+
+```bash data-label="python"
+pip install product-a-sdk
+```
+
+```bash data-label="curl"
+# No installation needed — curl comes with most systems
+curl --version
+```
+</CodeGroup>
+
+## Make Your First Request
+
+<Steps>
+<div>
+### Set up your environment
+
+Store your API key as an environment variable. Never hard-code secrets in source files.
+
+<CodeGroup>
+```bash data-label="node"
+export PRODUCT_A_API_KEY="your-api-key-here"
+```
+
+```bash data-label="python"
+export PRODUCT_A_API_KEY="your-api-key-here"
+```
+
+```bash data-label="curl"
+export PRODUCT_A_API_KEY="your-api-key-here"
+```
+</CodeGroup>
+</div>
+
+<div>
+### Initialize the client and send a request
+
+<CodeGroup>
+```typescript data-label="node"
+import { ProductA } from "@product-a/sdk";
+
+const client = new ProductA({
+  apiKey: process.env.PRODUCT_A_API_KEY,
+});
+
+const response = await client.resources.list({ limit: 5 });
+console.log(response.data);
+```
+
+```python data-label="python"
+from product_a import ProductA
+
+client = ProductA(api_key=os.environ["PRODUCT_A_API_KEY"])
+
+response = client.resources.list(limit=5)
+print(response.data)
+```
+
+```bash data-label="curl"
+curl -X GET "https://api.example.com/v1/resources?limit=5" \
+  -H "Authorization: Bearer $PRODUCT_A_API_KEY" \
+  -H "Content-Type: application/json"
+```
+</CodeGroup>
+</div>
+
+<div>
+### Interpret the response
+
+A successful response returns a JSON object with a `data` array:
+
+```json
+{
+  "data": [
+    {
+      "id": "res_abc123",
+      "name": "My Resource",
+      "status": "active",
+      "createdAt": "2026-03-25T10:30:00Z"
+    }
+  ],
+  "pagination": {
+    "total": 42,
+    "limit": 5,
+    "offset": 0,
+    "hasMore": true
+  }
+}
+```
+
+Every list endpoint returns a `pagination` object. See [Handle Pagination](/guides/core-concepts/handle-pagination) for details on navigating large result sets.
+</div>
+</Steps>
+
+## Error Handling Basics
+
+If something goes wrong, the API returns a structured error:
+
+```json
+{
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Invalid or expired API key",
+    "requestId": "req_xyz789"
+  }
+}
+```
+
+<Callout type="warning">
+  Always include the `requestId` when contacting support — it helps us trace your request through our systems.
+</Callout>
+
+## Next Steps
+
+You've made your first API call! Here's where to go next:
+
+| Guide | What you'll learn |
+|-------|------------------|
+| [Authenticate with OAuth](/guides/getting-started/authenticate-with-oauth) | Use OAuth 2.0 for user-delegated access |
+| [Error Handling Best Practices](/guides/core-concepts/error-handling-best-practices) | Build resilient API integrations |
+| [SDK Reference](/docs/product-a/sdk-reference) | Full SDK method documentation |

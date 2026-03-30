@@ -1,0 +1,254 @@
+---
+title: "Set Up Webhooks"
+description: "Receive real-time event notifications instead of polling. Learn how to register endpoints, verify signatures, and handle webhook deliveries reliably."
+difficulty: "intermediate"
+estimatedMinutes: 20
+products:
+  - product-a
+  - product-b
+category: "common-use-cases"
+order: 5
+updatedAt: "2026-03-28"
+---
+
+## Overview
+
+Webhooks push data to your application in real time when events occur — no polling required. Instead of periodically checking for changes, you register a URL and we send HTTP POST requests with event payloads.
+
+## How It Works
+
+1. You register a webhook endpoint URL in the Dashboard
+2. When an event occurs (e.g., resource created, payment completed), we send a POST request
+3. Your endpoint processes the event and returns a `200` response
+4. If delivery fails, we retry with exponential backoff
+
+## Setting Up Your Endpoint
+
+<Steps>
+<div>
+### Create a webhook handler
+
+Your endpoint must accept POST requests and return a `200` status quickly (within 30 seconds):
+
+<CodeGroup>
+```typescript data-label="node"
+import express from "express";
+import crypto from "crypto";
+
+const app = express();
+
+// Use raw body for signature verification
+app.post(
+  "/webhooks",
+  express.raw({ type: "application/json" }),
+  (req, res) => {
+    const signature = req.headers["x-webhook-signature"] as string;
+    const timestamp = req.headers["x-webhook-timestamp"] as string;
+
+    // Verify the signature (see next step)
+    if (!verifySignature(req.body, signature, timestamp)) {
+      return res.status(401).send("Invalid signature");
+    }
+
+    const event = JSON.parse(req.body.toString());
+
+    // Handle the event asynchronously
+    processEvent(event).catch(console.error);
+
+    // Respond immediately
+    res.status(200).json({ received: true });
+  }
+);
+
+app.listen(3000);
+```
+
+```python data-label="python"
+from flask import Flask, request, jsonify
+import hmac
+import hashlib
+
+app = Flask(__name__)
+
+@app.route("/webhooks", methods=["POST"])
+def handle_webhook():
+    signature = request.headers.get("X-Webhook-Signature")
+    timestamp = request.headers.get("X-Webhook-Timestamp")
+
+    # Verify the signature (see next step)
+    if not verify_signature(request.data, signature, timestamp):
+        return "Invalid signature", 401
+
+    event = request.json
+
+    # Handle the event asynchronously
+    process_event(event)
+
+    return jsonify({"received": True}), 200
+```
+</CodeGroup>
+
+<Callout type="warning">
+  Always respond with a `200` status before doing heavy processing. Use a message queue or background job for complex event handling. We'll retry if your endpoint doesn't respond within 30 seconds.
+</Callout>
+</div>
+
+<div>
+### Verify webhook signatures
+
+Every webhook request includes a signature to verify authenticity. Never process unverified webhooks:
+
+<CodeGroup>
+```typescript data-label="node"
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET!;
+
+function verifySignature(
+  payload: Buffer,
+  signature: string,
+  timestamp: string
+): boolean {
+  // Prevent replay attacks — reject timestamps older than 5 minutes
+  const eventTime = parseInt(timestamp);
+  const currentTime = Math.floor(Date.now() / 1000);
+  if (Math.abs(currentTime - eventTime) > 300) {
+    return false;
+  }
+
+  const signedPayload = `${timestamp}.${payload.toString()}`;
+  const expectedSignature = crypto
+    .createHmac("sha256", WEBHOOK_SECRET)
+    .update(signedPayload)
+    .digest("hex");
+
+  return crypto.timingSafeEqual(
+    Buffer.from(signature),
+    Buffer.from(expectedSignature)
+  );
+}
+```
+
+```python data-label="python"
+import time
+
+WEBHOOK_SECRET = os.environ["WEBHOOK_SECRET"]
+
+def verify_signature(payload: bytes, signature: str, timestamp: str) -> bool:
+    # Prevent replay attacks
+    event_time = int(timestamp)
+    current_time = int(time.time())
+    if abs(current_time - event_time) > 300:
+        return False
+
+    signed_payload = f"{timestamp}.{payload.decode()}"
+    expected = hmac.new(
+        WEBHOOK_SECRET.encode(),
+        signed_payload.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+    return hmac.compare_digest(signature, expected)
+```
+</CodeGroup>
+
+<Callout type="danger">
+  Use constant-time comparison (`timingSafeEqual` / `hmac.compare_digest`) to prevent timing attacks. Regular string comparison (`===` / `==`) leaks information about the expected signature.
+</Callout>
+</div>
+
+<div>
+### Register your endpoint
+
+Register your webhook URL in the Dashboard or via the API:
+
+<ApiEndpoint method="POST" path="/v1/webhooks" />
+
+```json
+{
+  "url": "https://yourapp.com/webhooks",
+  "events": ["resource.created", "resource.updated", "resource.deleted"],
+  "description": "Production webhook handler"
+}
+```
+
+The response includes your webhook secret for signature verification:
+
+```json
+{
+  "id": "wh_abc123",
+  "url": "https://yourapp.com/webhooks",
+  "secret": "whsec_...",
+  "events": ["resource.created", "resource.updated", "resource.deleted"],
+  "status": "active"
+}
+```
+</div>
+</Steps>
+
+## Event Types
+
+| Event | Description | Products |
+|-------|------------|----------|
+| `resource.created` | A new resource was created | Product A |
+| `resource.updated` | A resource was modified | Product A |
+| `resource.deleted` | A resource was deleted | Product A |
+| `payment.completed` | A payment was processed | Product B |
+| `payment.failed` | A payment attempt failed | Product B |
+| `subscription.renewed` | A subscription was renewed | Product B |
+
+## Handling Duplicate Deliveries
+
+Webhooks are delivered **at least once**. Your handler must be idempotent:
+
+```typescript
+async function processEvent(event: WebhookEvent) {
+  // Use the event ID to deduplicate
+  const alreadyProcessed = await db.webhookEvents.findUnique({
+    where: { eventId: event.id },
+  });
+
+  if (alreadyProcessed) {
+    console.log(`Event ${event.id} already processed, skipping`);
+    return;
+  }
+
+  // Process the event
+  await handleEvent(event);
+
+  // Mark as processed
+  await db.webhookEvents.create({
+    data: { eventId: event.id, processedAt: new Date() },
+  });
+}
+```
+
+## Retry Policy
+
+Failed deliveries are retried with exponential backoff:
+
+| Attempt | Delay |
+|---------|-------|
+| 1 | Immediate |
+| 2 | 1 minute |
+| 3 | 5 minutes |
+| 4 | 30 minutes |
+| 5 | 2 hours |
+| 6 | 8 hours |
+
+After 6 failed attempts, the webhook is marked as `failing` and you'll receive an email notification.
+
+## Testing Webhooks Locally
+
+Use the CLI to forward webhook events to your local development server:
+
+```bash
+npx product-a-cli webhooks listen --forward-to http://localhost:3000/webhooks
+```
+
+<Callout type="tip">
+  The CLI tool creates a temporary tunnel and registers it as a webhook endpoint. Events are forwarded to your local server in real time.
+</Callout>
+
+## Next Steps
+
+- [Error Handling Best Practices](/guides/core-concepts/error-handling-best-practices) — handle webhook processing failures
+- [Build a Notification Pipeline](/guides/advanced/build-a-notification-pipeline) — combine webhooks with other products
