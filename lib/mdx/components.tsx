@@ -1,9 +1,17 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { createContext, useContext, useState, useMemo } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { CopyButton } from "@/components/ui/copy-button";
+import { CodeBlock } from "@/components/ui/code-block";
+import {
+  useLanguage,
+  type SupportedLanguage,
+} from "@/lib/mdx/language-context";
+
+// When true, Pre renders a bare <pre> without wrapper/header (CodeGroup provides its own)
+const CodeGroupContext = createContext(false);
 import {
   Info,
   AlertTriangle,
@@ -48,10 +56,10 @@ function createHeading(level: 1 | 2 | 3 | 4 | 5 | 6) {
     const id = props.id ?? slugify(text);
 
     return (
-      <Tag id={id} className={cn("group scroll-mt-24", sizes[level])} {...props}>
+      <Tag id={id} className={cn("group scroll-mt-24 text-foreground", sizes[level])} {...props}>
         <a
           href={`#${id}`}
-          className="inline-flex items-center no-underline hover:underline"
+          className="inline-flex items-center text-inherit no-underline hover:underline"
         >
           {children}
           <LinkIcon className="ml-2 h-4 w-4 opacity-0 transition-opacity group-hover:opacity-50" />
@@ -69,6 +77,26 @@ function createHeading(level: 1 | 2 | 3 | 4 | 5 | 6) {
 // ---------------------------------------------------------------------------
 
 function Pre({ children, ...props }: React.HTMLAttributes<HTMLPreElement>) {
+  const insideCodeGroup = useContext(CodeGroupContext);
+  const propsRecord = props as Record<string, unknown>;
+
+  // Inside CodeGroup — render bare <pre> without wrapper (CodeGroup provides its own)
+  if (insideCodeGroup) {
+    return (
+      <pre
+        {...props}
+        className={cn(
+          "overflow-x-auto p-4 text-sm leading-relaxed",
+          "font-[var(--font-jetbrains-mono)]",
+          "max-h-[32rem] overflow-y-auto",
+          props.className
+        )}
+      >
+        {children}
+      </pre>
+    );
+  }
+
   const codeEl = React.Children.toArray(children).find(
     (child): child is React.ReactElement =>
       React.isValidElement(child) && (child as React.ReactElement).type === "code"
@@ -80,14 +108,51 @@ function Pre({ children, ...props }: React.HTMLAttributes<HTMLPreElement>) {
       : "";
 
   const dataLanguage =
-    (props as Record<string, unknown>)["data-language"] ??
+    propsRecord["data-language"] ??
     (codeEl &&
       ((codeEl.props as Record<string, unknown>)["data-language"] as string | undefined));
 
+  // Parse meta string attributes for enhanced features
+  const rawMeta = (propsRecord["data-meta"] as string) ?? "";
+  const showLineNumbers = rawMeta.includes("showLineNumbers");
+  const titleMatch = rawMeta.match(/title="([^"]+)"/);
+  const title = titleMatch?.[1] ?? undefined;
+
+  // Parse highlight lines: {1,3-5}
+  const highlightMatch = rawMeta.match(/\{([^}]+)\}/);
+  const highlightLines: number[] = [];
+  if (highlightMatch) {
+    for (const part of highlightMatch[1].split(",")) {
+      const range = part.trim().split("-");
+      if (range.length === 2) {
+        const start = parseInt(range[0], 10);
+        const end = parseInt(range[1], 10);
+        for (let i = start; i <= end; i++) highlightLines.push(i);
+      } else {
+        highlightLines.push(parseInt(range[0], 10));
+      }
+    }
+  }
+
+  const hasEnhancements = showLineNumbers || highlightLines.length > 0 || title;
+
+  if (hasEnhancements) {
+    return (
+      <CodeBlock
+        language={dataLanguage ? String(dataLanguage) : undefined}
+        title={title}
+        showLineNumbers={showLineNumbers}
+        highlightLines={highlightLines}
+      >
+        {children}
+      </CodeBlock>
+    );
+  }
+
   return (
-    <div className="group relative my-6 rounded-lg border border-gray-200 dark:border-gray-700">
+    <div className="group relative my-6 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
       {dataLanguage && (
-        <div className="flex items-center justify-between rounded-t-lg border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-400">
+        <div className="flex items-center justify-between border-b border-gray-200 bg-gray-100 px-4 py-2 text-xs font-medium text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
           {String(dataLanguage)}
         </div>
       )}
@@ -97,6 +162,7 @@ function Pre({ children, ...props }: React.HTMLAttributes<HTMLPreElement>) {
         className={cn(
           "overflow-x-auto p-4 text-sm leading-relaxed",
           "font-[var(--font-jetbrains-mono)]",
+          "max-h-[32rem] overflow-y-auto",
           props.className
         )}
       >
@@ -106,10 +172,20 @@ function Pre({ children, ...props }: React.HTMLAttributes<HTMLPreElement>) {
   );
 }
 
-function InlineCode({
+function Code({
   children,
   ...props
 }: React.HTMLAttributes<HTMLElement>) {
+  // rehype-pretty-code sets data-theme on code elements inside pre blocks.
+  // Those should pass through unstyled — the Pre wrapper handles their container.
+  const isCodeBlock = (props as Record<string, unknown>)["data-theme"] !== undefined ||
+                       (props as Record<string, unknown>)["data-language"] !== undefined;
+
+  if (isCodeBlock) {
+    return <code {...props}>{children}</code>;
+  }
+
+  // Inline code — add styling
   return (
     <code
       {...props}
@@ -271,35 +347,96 @@ interface CodeGroupProps {
   children: React.ReactNode;
 }
 
+/** Extracts plain text from a React node tree for the copy button. */
+function extractCodeText(node: React.ReactNode): string {
+  if (typeof node === "string") return node;
+  if (typeof node === "number") return String(node);
+  if (!node) return "";
+  if (Array.isArray(node)) return node.map(extractCodeText).join("");
+  if (React.isValidElement(node)) {
+    return extractCodeText((node.props as { children?: React.ReactNode }).children);
+  }
+  return "";
+}
+
+/** Traverses a React element tree to find a prop value (e.g. data-label, data-language). */
+function findPropDeep(node: React.ReactNode, propName: string): string | undefined {
+  if (!React.isValidElement(node)) return undefined;
+  const props = node.props as Record<string, unknown>;
+  if (props[propName]) return String(props[propName]);
+  const children = React.Children.toArray(props.children as React.ReactNode);
+  for (const child of children) {
+    const found = findPropDeep(child, propName);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 function CodeGroup({ children }: CodeGroupProps) {
-  const [activeTab, setActiveTab] = useState(0);
+  let contextLanguage: SupportedLanguage | null = null;
+  try {
+    const ctx = useLanguage();
+    contextLanguage = ctx.language;
+  } catch {
+    // Not inside LanguageProvider — fall back to manual tab selection
+  }
 
   const tabs = React.Children.toArray(children).filter(React.isValidElement);
-  const labels = tabs.map((tab) => {
-    const props = tab.props as Record<string, unknown>;
-    return (props["data-label"] as string) ?? (props["data-language"] as string) ?? `Tab ${tabs.indexOf(tab) + 1}`;
-  });
+
+  const tabInfo = useMemo(() => {
+    return tabs.map((tab, i) => {
+      // Look deep into the tree (Figure → Pre → Code) for label/language
+      const label =
+        findPropDeep(tab, "data-label") ??
+        findPropDeep(tab, "data-language") ??
+        `Tab ${i + 1}`;
+      const langKey = label.toLowerCase().replace(/[^a-z]/g, "");
+      return { label, langKey };
+    });
+  }, [tabs]);
+
+  // Determine active tab: prefer language context match, otherwise first tab
+  const contextMatchIndex = contextLanguage
+    ? tabInfo.findIndex(
+        (t) =>
+          t.langKey === contextLanguage ||
+          t.langKey === contextLanguage.replace(/[^a-z]/g, "")
+      )
+    : -1;
+
+  const [manualTab, setManualTab] = useState(0);
+  const activeTab = contextMatchIndex >= 0 ? contextMatchIndex : manualTab;
+
+  const activeContent = tabs[activeTab];
+  const activeText = activeContent ? extractCodeText(activeContent) : "";
 
   return (
-    <div className="my-6 rounded-lg border border-gray-200 dark:border-gray-700">
-      <div className="flex gap-0 border-b border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800/50">
-        {labels.map((label, i) => (
-          <button
-            key={label}
-            onClick={() => setActiveTab(i)}
-            className={cn(
-              "px-4 py-2 text-xs font-medium transition-colors",
-              i === activeTab
-                ? "border-b-2 border-blue-500 text-blue-600 dark:text-blue-400"
-                : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-            )}
-          >
-            {label}
-          </button>
-        ))}
+    <CodeGroupContext.Provider value={true}>
+      <div className="group relative my-6 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-between border-b border-gray-200 bg-gray-100 dark:border-gray-700 dark:bg-gray-800">
+          <div className="flex gap-0">
+            {tabInfo.map((info, i) => (
+              <button
+                key={info.label + i}
+                onClick={() => setManualTab(i)}
+                className={cn(
+                  "px-4 py-2 text-xs font-medium transition-colors",
+                  i === activeTab
+                    ? "border-b-2 border-blue-500 text-blue-600 dark:text-blue-400"
+                    : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+                )}
+              >
+                {info.label}
+              </button>
+            ))}
+          </div>
+          <div className="pr-2">
+            <CopyButton text={activeText} className="relative opacity-100 right-0 top-0 position-static" />
+          </div>
+        </div>
+        <div className="overflow-x-auto max-h-[32rem] overflow-y-auto">{tabs[activeTab]}</div>
       </div>
-      <div>{tabs[activeTab]}</div>
-    </div>
+    </CodeGroupContext.Provider>
   );
 }
 
@@ -370,13 +507,13 @@ function ApiEndpoint({ method, path }: ApiEndpointProps) {
 // ---------------------------------------------------------------------------
 
 function Paragraph(props: React.HTMLAttributes<HTMLParagraphElement>) {
-  return <p className="my-4 leading-7 text-gray-700 dark:text-gray-300" {...props} />;
+  return <p className="my-4 leading-7 text-foreground/90" {...props} />;
 }
 
 function UnorderedList(props: React.HTMLAttributes<HTMLUListElement>) {
   return (
     <ul
-      className="my-4 ml-6 list-disc space-y-2 text-gray-700 dark:text-gray-300"
+      className="my-4 ml-6 list-disc space-y-2 text-foreground/90"
       {...props}
     />
   );
@@ -385,7 +522,7 @@ function UnorderedList(props: React.HTMLAttributes<HTMLUListElement>) {
 function OrderedList(props: React.OlHTMLAttributes<HTMLOListElement>) {
   return (
     <ol
-      className="my-4 ml-6 list-decimal space-y-2 text-gray-700 dark:text-gray-300"
+      className="my-4 ml-6 list-decimal space-y-2 text-foreground/90"
       {...props}
     />
   );
@@ -393,6 +530,19 @@ function OrderedList(props: React.OlHTMLAttributes<HTMLOListElement>) {
 
 function HorizontalRule() {
   return <hr className="my-8 border-gray-200 dark:border-gray-700" />;
+}
+
+// ---------------------------------------------------------------------------
+// Figure (strip rehype-pretty-code's <figure> wrapper)
+// ---------------------------------------------------------------------------
+
+function Figure({ children, ...props }: React.HTMLAttributes<HTMLElement>) {
+  // rehype-pretty-code wraps code blocks in <figure data-rehype-pretty-code-figure>.
+  // Render its children directly to avoid default figure margins/styling.
+  if ((props as Record<string, unknown>)["data-rehype-pretty-code-figure"] !== undefined) {
+    return <>{children}</>;
+  }
+  return <figure {...props}>{children}</figure>;
 }
 
 // ---------------------------------------------------------------------------
@@ -409,7 +559,8 @@ export const mdxComponents = {
   p: Paragraph,
   a: Anchor,
   pre: Pre,
-  code: InlineCode,
+  code: Code,
+  figure: Figure,
   table: Table,
   th: Th,
   td: Td,
