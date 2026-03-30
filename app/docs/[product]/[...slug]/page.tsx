@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { serialize } from "next-mdx-remote/serialize";
 import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
-import rehypeAutolinkHeadings from "rehype-autolink-headings";
+// rehypeAutolinkHeadings removed — createHeading in mdx/components.tsx handles anchor links
 import rehypePrettyCode from "rehype-pretty-code";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -90,8 +90,16 @@ export default async function DocPage({ params }: Props) {
       remarkPlugins: [remarkGfm],
       rehypePlugins: [
         rehypeSlug,
-        [rehypeAutolinkHeadings, { behavior: "wrap" }],
-        [rehypePrettyCode, { theme: "github-dark-dimmed" }],
+        [
+          rehypePrettyCode,
+          {
+            theme: {
+              dark: "github-dark-dimmed",
+              light: "github-light",
+            },
+            defaultColor: "light",
+          },
+        ],
       ],
     },
   });

@@ -89,3 +89,26 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans);
 }
+
+/* rehype-pretty-code: dual theme via CSS variables.
+   defaultColor: "light" stores all colors as --shiki-light / --shiki-dark CSS vars.
+   We apply the correct set based on the current theme. */
+figure[data-rehype-pretty-code-figure] {
+  margin: 0;
+}
+
+pre[data-theme] {
+  background-color: var(--shiki-light-bg) !important;
+}
+
+code[data-theme] span {
+  color: var(--shiki-light);
+}
+
+.dark pre[data-theme] {
+  background-color: var(--shiki-dark-bg) !important;
+}
+
+.dark code[data-theme] span {
+  color: var(--shiki-dark);
+}
