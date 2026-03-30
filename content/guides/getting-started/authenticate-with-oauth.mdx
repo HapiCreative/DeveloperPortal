@@ -1,0 +1,173 @@
+---
+title: "Authenticate with OAuth"
+description: "Set up OAuth 2.0 authentication so your application can act on behalf of users. Covers the authorization code flow, token refresh, and common pitfalls."
+difficulty: "beginner"
+estimatedMinutes: 15
+products:
+  - product-a
+category: "getting-started"
+order: 2
+updatedAt: "2026-03-27"
+---
+
+## Overview
+
+While API keys are great for server-to-server communication, OAuth 2.0 lets your application act on behalf of a user. This guide walks through the **Authorization Code** flow — the recommended approach for web applications.
+
+## Prerequisites
+
+- A registered OAuth application ([create one in the Dashboard](/dashboard/oauth-apps))
+- Your **Client ID** and **Client Secret**
+- A configured **Redirect URI**
+
+<Callout type="info">
+  For single-page apps or mobile apps, use the **Authorization Code with PKCE** extension. The flow is similar but doesn't require a client secret on the front end.
+</Callout>
+
+## The Authorization Code Flow
+
+<Steps>
+<div>
+### Redirect the user to authorize
+
+Build the authorization URL and redirect the user's browser:
+
+<CodeGroup>
+```typescript data-label="node"
+const authUrl = new URL("https://auth.example.com/oauth/authorize");
+authUrl.searchParams.set("client_id", process.env.OAUTH_CLIENT_ID!);
+authUrl.searchParams.set("redirect_uri", "https://yourapp.com/callback");
+authUrl.searchParams.set("response_type", "code");
+authUrl.searchParams.set("scope", "resources:read resources:write");
+authUrl.searchParams.set("state", generateRandomState());
+
+// Redirect the user
+res.redirect(authUrl.toString());
+```
+
+```python data-label="python"
+from urllib.parse import urlencode
+
+params = urlencode({
+    "client_id": os.environ["OAUTH_CLIENT_ID"],
+    "redirect_uri": "https://yourapp.com/callback",
+    "response_type": "code",
+    "scope": "resources:read resources:write",
+    "state": generate_random_state(),
+})
+
+auth_url = f"https://auth.example.com/oauth/authorize?{params}"
+# Redirect the user to auth_url
+```
+</CodeGroup>
+
+<Callout type="warning">
+  Always include a `state` parameter to prevent CSRF attacks. Generate a random string, store it in the user's session, and verify it when the callback arrives.
+</Callout>
+</div>
+
+<div>
+### Exchange the code for tokens
+
+When the user approves, they're redirected back to your app with a `code` parameter:
+
+<CodeGroup>
+```typescript data-label="node"
+const tokenResponse = await fetch("https://auth.example.com/oauth/token", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    grant_type: "authorization_code",
+    code: req.query.code,
+    redirect_uri: "https://yourapp.com/callback",
+    client_id: process.env.OAUTH_CLIENT_ID,
+    client_secret: process.env.OAUTH_CLIENT_SECRET,
+  }),
+});
+
+const { access_token, refresh_token, expires_in } = await tokenResponse.json();
+```
+
+```python data-label="python"
+import requests
+
+token_response = requests.post(
+    "https://auth.example.com/oauth/token",
+    json={
+        "grant_type": "authorization_code",
+        "code": request.args["code"],
+        "redirect_uri": "https://yourapp.com/callback",
+        "client_id": os.environ["OAUTH_CLIENT_ID"],
+        "client_secret": os.environ["OAUTH_CLIENT_SECRET"],
+    },
+)
+
+data = token_response.json()
+access_token = data["access_token"]
+refresh_token = data["refresh_token"]
+```
+</CodeGroup>
+</div>
+
+<div>
+### Use the access token
+
+Include the access token in the `Authorization` header:
+
+<CodeGroup>
+```typescript data-label="node"
+import { ProductA } from "@product-a/sdk";
+
+const client = new ProductA({
+  accessToken: access_token,
+});
+
+const user = await client.users.me();
+console.log(`Authenticated as: ${user.name}`);
+```
+
+```python data-label="python"
+from product_a import ProductA
+
+client = ProductA(access_token=access_token)
+
+user = client.users.me()
+print(f"Authenticated as: {user.name}")
+```
+</CodeGroup>
+</div>
+</Steps>
+
+## Refreshing Tokens
+
+Access tokens expire after the duration specified in `expires_in` (typically 1 hour). Use the refresh token to get a new one:
+
+```typescript
+const refreshResponse = await fetch("https://auth.example.com/oauth/token", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    grant_type: "refresh_token",
+    refresh_token: storedRefreshToken,
+    client_id: process.env.OAUTH_CLIENT_ID,
+    client_secret: process.env.OAUTH_CLIENT_SECRET,
+  }),
+});
+```
+
+<Callout type="danger">
+  Store refresh tokens securely — they grant long-lived access. Never expose them in client-side code or logs.
+</Callout>
+
+## Common Pitfalls
+
+| Issue | Solution |
+|-------|---------|
+| `invalid_grant` error | The authorization code has expired or was already used. Codes are single-use and expire after 10 minutes. |
+| `redirect_uri_mismatch` | The redirect URI must exactly match what's registered in the Dashboard, including trailing slashes. |
+| Missing scopes | Request all needed scopes upfront. You can request fewer scopes than registered, but not more. |
+
+## Next Steps
+
+- [Error Handling Best Practices](/guides/core-concepts/error-handling-best-practices) — handle token expiry gracefully
+- [Set Up Webhooks](/guides/common-use-cases/set-up-webhooks) — receive real-time events instead of polling

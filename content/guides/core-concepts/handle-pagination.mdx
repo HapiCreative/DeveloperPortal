@@ -1,0 +1,203 @@
+---
+title: "Handle Pagination"
+description: "Learn how to efficiently navigate large result sets using cursor-based and offset-based pagination across all API endpoints."
+difficulty: "intermediate"
+estimatedMinutes: 10
+products:
+  - product-a
+  - product-b
+category: "core-concepts"
+order: 3
+updatedAt: "2026-03-26"
+---
+
+## Overview
+
+All list endpoints return paginated results. The API supports two pagination styles depending on the endpoint:
+
+- **Cursor-based** (recommended) — efficient for large or frequently-changing datasets
+- **Offset-based** — simpler, useful for small datasets or when you need random page access
+
+## Cursor-Based Pagination
+
+Most endpoints use cursor-based pagination. Each response includes a `cursor` that points to the next page:
+
+```json
+{
+  "data": [...],
+  "pagination": {
+    "hasMore": true,
+    "cursor": "eyJpZCI6InJlc18xMjM0NTYifQ=="
+  }
+}
+```
+
+### Iterating through all pages
+
+<CodeGroup>
+```typescript data-label="node"
+import { ProductA } from "@product-a/sdk";
+
+const client = new ProductA({ apiKey: process.env.PRODUCT_A_API_KEY });
+
+let cursor: string | undefined;
+const allResources = [];
+
+do {
+  const response = await client.resources.list({
+    limit: 100,
+    cursor,
+  });
+
+  allResources.push(...response.data);
+  cursor = response.pagination.hasMore
+    ? response.pagination.cursor
+    : undefined;
+} while (cursor);
+
+console.log(`Fetched ${allResources.length} resources total`);
+```
+
+```python data-label="python"
+from product_a import ProductA
+
+client = ProductA(api_key=os.environ["PRODUCT_A_API_KEY"])
+
+all_resources = []
+cursor = None
+
+while True:
+    response = client.resources.list(limit=100, cursor=cursor)
+    all_resources.extend(response.data)
+
+    if not response.pagination.has_more:
+        break
+    cursor = response.pagination.cursor
+
+print(f"Fetched {len(all_resources)} resources total")
+```
+</CodeGroup>
+
+<Callout type="tip">
+  Use the maximum `limit` (usually 100) to reduce the number of API calls. Each call counts toward your rate limit.
+</Callout>
+
+## Offset-Based Pagination
+
+Some endpoints (like search) use offset-based pagination:
+
+```json
+{
+  "data": [...],
+  "pagination": {
+    "total": 342,
+    "limit": 20,
+    "offset": 0,
+    "hasMore": true
+  }
+}
+```
+
+### Example: paginating search results
+
+<CodeGroup>
+```typescript data-label="node"
+const pageSize = 20;
+let offset = 0;
+
+const firstPage = await client.resources.search({
+  query: "production",
+  limit: pageSize,
+  offset,
+});
+
+console.log(`Total results: ${firstPage.pagination.total}`);
+console.log(`Showing ${offset + 1}–${offset + firstPage.data.length}`);
+
+// Next page
+offset += pageSize;
+const secondPage = await client.resources.search({
+  query: "production",
+  limit: pageSize,
+  offset,
+});
+```
+
+```python data-label="python"
+page_size = 20
+offset = 0
+
+first_page = client.resources.search(
+    query="production",
+    limit=page_size,
+    offset=offset,
+)
+
+print(f"Total results: {first_page.pagination.total}")
+print(f"Showing {offset + 1}–{offset + len(first_page.data)}")
+
+# Next page
+offset += page_size
+second_page = client.resources.search(
+    query="production",
+    limit=page_size,
+    offset=offset,
+)
+```
+</CodeGroup>
+
+<Callout type="warning">
+  Offset pagination can return duplicate or missed items if the dataset changes between requests. For real-time data, prefer cursor-based pagination.
+</Callout>
+
+## Putting It Together
+
+<Steps>
+<div>
+### Choose your pagination style
+
+Check the endpoint documentation. Most endpoints use cursor-based pagination (look for `cursor` in the response). Search endpoints typically use offset-based pagination (look for `total` and `offset`).
+</div>
+
+<div>
+### Implement the loop
+
+Use the cursor or offset pattern from the examples above. Always check `hasMore` before fetching the next page.
+</div>
+
+<div>
+### Add rate-limit awareness
+
+The API returns rate-limit headers with every response:
+
+```
+X-RateLimit-Limit: 1000
+X-RateLimit-Remaining: 994
+X-RateLimit-Reset: 1711584000
+```
+
+If `X-RateLimit-Remaining` is low, add a delay between pagination requests:
+
+```typescript
+if (parseInt(headers["x-ratelimit-remaining"]) < 10) {
+  const resetTime = parseInt(headers["x-ratelimit-reset"]) * 1000;
+  const waitMs = Math.max(0, resetTime - Date.now());
+  await new Promise((resolve) => setTimeout(resolve, waitMs));
+}
+```
+</div>
+</Steps>
+
+## Best Practices
+
+| Practice | Why |
+|----------|-----|
+| Use the maximum `limit` | Fewer requests, lower latency, less rate-limit pressure |
+| Prefer cursors over offsets | Stable iteration even when data changes |
+| Don't fetch everything at once | Stream or process in batches to control memory usage |
+| Cache `total` counts | The `total` field can be expensive — don't request it on every page |
+
+## Next Steps
+
+- [Error Handling Best Practices](/guides/core-concepts/error-handling-best-practices) — handle rate-limit errors gracefully
+- [Set Up Webhooks](/guides/common-use-cases/set-up-webhooks) — get pushed data instead of polling

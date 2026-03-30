@@ -1,0 +1,333 @@
+---
+title: "Build a Notification Pipeline"
+description: "Create a multi-channel notification system that combines Product A events with Product C's messaging infrastructure. Covers event routing, template management, and delivery tracking."
+difficulty: "advanced"
+estimatedMinutes: 30
+products:
+  - product-a
+  - product-c
+category: "advanced-patterns"
+order: 6
+updatedAt: "2026-03-28"
+---
+
+## Overview
+
+This guide walks through building a notification pipeline that listens to events from Product A and delivers notifications through Product C's multi-channel messaging service. By the end, you'll have a system that can:
+
+- Receive real-time events via webhooks
+- Route events to notification templates
+- Deliver messages across email, SMS, and push
+- Track delivery status and handle failures
+
+## Architecture
+
+```
+Product A Events → Webhook Handler → Event Router → Product C Messaging
+                                          ↓
+                                    Template Engine
+                                          ↓
+                                  Delivery Tracker
+```
+
+## Prerequisites
+
+- Completed [Set Up Webhooks](/guides/common-use-cases/set-up-webhooks)
+- Product A API key with `resources:read` and `webhooks:manage` scopes
+- Product C API key with `messages:send` and `templates:read` scopes
+- A message queue system (Redis, SQS, or similar)
+
+<Callout type="info">
+  This is a cross-product integration. You'll need active subscriptions to both Product A and Product C.
+</Callout>
+
+## Building the Pipeline
+
+<Steps>
+<div>
+### Set up the event router
+
+Create a router that maps Product A events to notification actions:
+
+```typescript
+interface NotificationRule {
+  event: string;
+  templateId: string;
+  channels: ("email" | "sms" | "push")[];
+  recipients: (event: any) => string[];
+}
+
+const rules: NotificationRule[] = [
+  {
+    event: "resource.created",
+    templateId: "tmpl_welcome_resource",
+    channels: ["email"],
+    recipients: (event) => [event.data.owner.email],
+  },
+  {
+    event: "resource.updated",
+    templateId: "tmpl_resource_updated",
+    channels: ["email", "push"],
+    recipients: (event) => event.data.watchers.map((w: any) => w.email),
+  },
+  {
+    event: "payment.failed",
+    templateId: "tmpl_payment_failed",
+    channels: ["email", "sms"],
+    recipients: (event) => [event.data.customer.email],
+  },
+];
+
+function findMatchingRules(eventType: string): NotificationRule[] {
+  return rules.filter((rule) => rule.event === eventType);
+}
+```
+</div>
+
+<div>
+### Connect the webhook handler to the queue
+
+Instead of processing notifications synchronously in the webhook handler, push events to a message queue:
+
+```typescript
+import { Queue } from "bullmq";
+
+const notificationQueue = new Queue("notifications", {
+  connection: { host: "localhost", port: 6379 },
+});
+
+// In your webhook handler:
+async function handleWebhook(event: WebhookEvent) {
+  const matchingRules = findMatchingRules(event.type);
+
+  for (const rule of matchingRules) {
+    const recipients = rule.recipients(event);
+
+    for (const recipient of recipients) {
+      await notificationQueue.add("send-notification", {
+        eventId: event.id,
+        templateId: rule.templateId,
+        channels: rule.channels,
+        recipient,
+        data: event.data,
+      });
+    }
+  }
+}
+```
+
+<Callout type="tip">
+  Using a message queue decouples event ingestion from delivery. This ensures webhook responses stay fast and notifications can be retried independently.
+</Callout>
+</div>
+
+<div>
+### Build the notification worker
+
+Process queued notifications using Product C's messaging API:
+
+```typescript
+import { Worker } from "bullmq";
+import { ProductC } from "@product-c/sdk";
+
+const messaging = new ProductC({
+  apiKey: process.env.PRODUCT_C_API_KEY,
+});
+
+const worker = new Worker(
+  "notifications",
+  async (job) => {
+    const { templateId, channels, recipient, data, eventId } = job.data;
+
+    // Render the template with event data
+    const rendered = await messaging.templates.render({
+      templateId,
+      variables: {
+        resourceName: data.name,
+        resourceId: data.id,
+        actionUrl: `https://app.example.com/resources/${data.id}`,
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    // Send through each channel
+    const deliveries = await Promise.allSettled(
+      channels.map((channel: string) =>
+        messaging.messages.send({
+          channel,
+          to: recipient,
+          subject: rendered.subject,
+          body: rendered.body,
+          metadata: { eventId, templateId },
+        })
+      )
+    );
+
+    // Log delivery results
+    for (const [i, result] of deliveries.entries()) {
+      if (result.status === "rejected") {
+        console.error(
+          `Failed to send ${channels[i]} notification:`,
+          result.reason
+        );
+      }
+    }
+  },
+  {
+    connection: { host: "localhost", port: 6379 },
+    concurrency: 10,
+  }
+);
+```
+</div>
+
+<div>
+### Create notification templates
+
+Set up templates in Product C for each notification type:
+
+```typescript
+await messaging.templates.create({
+  id: "tmpl_welcome_resource",
+  name: "Welcome — Resource Created",
+  channels: {
+    email: {
+      subject: "Your resource '{{resourceName}}' is ready",
+      body: `
+        <h1>Resource Created Successfully</h1>
+        <p>Your resource <strong>{{resourceName}}</strong> ({{resourceId}}) has been created and is ready to use.</p>
+        <a href="{{actionUrl}}">View Resource</a>
+      `,
+    },
+    push: {
+      title: "Resource Ready",
+      body: "{{resourceName}} has been created successfully.",
+    },
+  },
+});
+```
+</div>
+
+<div>
+### Add delivery tracking
+
+Track notification delivery status for monitoring and debugging:
+
+<CodeGroup>
+```typescript data-label="node"
+interface DeliveryRecord {
+  eventId: string;
+  recipient: string;
+  channel: string;
+  status: "sent" | "delivered" | "failed" | "bounced";
+  messageId?: string;
+  error?: string;
+  timestamp: Date;
+}
+
+async function trackDelivery(record: DeliveryRecord) {
+  await db.notificationDeliveries.create({ data: record });
+
+  // Alert on repeated failures
+  const recentFailures = await db.notificationDeliveries.count({
+    where: {
+      recipient: record.recipient,
+      status: "failed",
+      timestamp: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+    },
+  });
+
+  if (recentFailures >= 5) {
+    console.warn(`Recipient ${record.recipient} has ${recentFailures} failed deliveries in 24h`);
+  }
+}
+```
+
+```python data-label="python"
+from datetime import datetime, timedelta
+
+async def track_delivery(
+    event_id: str,
+    recipient: str,
+    channel: str,
+    status: str,
+    message_id: str | None = None,
+    error: str | None = None,
+):
+    await db.notification_deliveries.create(
+        event_id=event_id,
+        recipient=recipient,
+        channel=channel,
+        status=status,
+        message_id=message_id,
+        error=error,
+        timestamp=datetime.utcnow(),
+    )
+
+    # Alert on repeated failures
+    cutoff = datetime.utcnow() - timedelta(hours=24)
+    recent_failures = await db.notification_deliveries.count(
+        recipient=recipient,
+        status="failed",
+        timestamp_gte=cutoff,
+    )
+
+    if recent_failures >= 5:
+        logger.warning(
+            f"Recipient {recipient} has {recent_failures} failed deliveries in 24h"
+        )
+```
+</CodeGroup>
+</div>
+</Steps>
+
+## Handling Failures
+
+### Retry strategy
+
+Configure different retry strategies for different channels:
+
+```typescript
+const retryConfig = {
+  email: { maxRetries: 3, backoff: "exponential", delay: 60_000 },
+  sms: { maxRetries: 2, backoff: "fixed", delay: 30_000 },
+  push: { maxRetries: 1, backoff: "none" },
+};
+```
+
+### Dead letter queue
+
+Notifications that fail all retries go to a dead letter queue for manual review:
+
+```typescript
+const notificationQueue = new Queue("notifications", {
+  connection: { host: "localhost", port: 6379 },
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 60_000 },
+    removeOnComplete: 1000,
+    removeOnFail: false, // Keep failed jobs for inspection
+  },
+});
+```
+
+<Callout type="warning">
+  Monitor your dead letter queue. Failed notifications often indicate systemic issues like invalid recipient data or template rendering errors.
+</Callout>
+
+## Monitoring
+
+Track these metrics for pipeline health:
+
+| Metric | Alert Threshold | Description |
+|--------|----------------|-------------|
+| Delivery latency (p95) | > 30s | Time from event to notification delivery |
+| Failure rate | > 5% | Percentage of failed deliveries |
+| Queue depth | > 1000 | Pending notifications in the queue |
+| Template render errors | > 0 | Broken templates need immediate attention |
+
+## Next Steps
+
+- [Product A Webhooks Reference](/docs/product-a/webhooks) — complete event type reference
+- [Error Handling Best Practices](/guides/core-concepts/error-handling-best-practices) — build resilient error handling
+- [Handle Pagination](/guides/core-concepts/handle-pagination) — paginate through historical events
